@@ -1,0 +1,8 @@
+node_modules
+.calude
+calude.md
+docs
+CLAUDE.md
+.env
+reports/
+dist/
