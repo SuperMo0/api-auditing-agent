@@ -7,9 +7,12 @@ const model = new ChatGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
+// Store the trigger as a JSON-encoded string to avoid Gemini schema issues.
+// z.record() emits "propertyNames" which Gemini rejects, and nested object schemas
+// cause hallucination loops. A plain string is reliable and can be decoded later.
 const VulnerabilitySchema = z.object({
   severity: z.enum(['Low', 'Moderate', 'High']),
-  trigger: z.record(z.string(), z.unknown()),
+  triggerJson: z.string().describe('JSON string of the exact request payload that triggered this vulnerability'),
   statusCode: z.number(),
   description: z.string(),
 });
@@ -45,8 +48,22 @@ ${JSON.stringify(state.currentBatch, null, 2)}`;
   console.log(`[Evaluate] New vulnerabilities found: ${result.vulnerabilities.length}`);
   console.log(`[Evaluate] ${result.summary}`);
 
+  // Map from LLM output (triggerJson string) to the Vulnerability interface (trigger object).
+  const vulnerabilities: Vulnerability[] = result.vulnerabilities.map((v) => {
+    let trigger: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(v.triggerJson);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        trigger = parsed as Record<string, unknown>;
+      }
+    } catch {
+      trigger = { raw: v.triggerJson };
+    }
+    return { severity: v.severity, trigger, statusCode: v.statusCode, description: v.description };
+  });
+
   return {
-    discoveredVulnerabilities: result.vulnerabilities as Vulnerability[],
+    discoveredVulnerabilities: vulnerabilities,
     iterationCount: state.iterationCount + 1,
   };
 }
